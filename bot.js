@@ -19,28 +19,42 @@ bot.on("message", async (ctx) => {
 
     ctx.reply("در حال پردازش لینک... لطفاً کمی صبر کنید ⏳");
 
+    let browser;
     try {
-        const browser = await puppeteer.launch({ headless: "new" });
+        browser = await puppeteer.launch({ headless: "new" });
         const page = await browser.newPage();
-        
-        await page.goto(text, { waitUntil: "networkidle2" });
 
-        const content = await page.evaluate(() => document.body.innerText);
-        await browser.close();
+        await page.goto(text, { waitUntil: "networkidle2", timeout: 60000 });
+
+        // استخراج دقیق‌تر محتوای گفتگو
+        const content = await page.evaluate(() => {
+            const messages = document.querySelectorAll(".text-base");
+            return Array.from(messages).map(msg => msg.innerText).join("\n\n");
+        });
+
+        await browser.close(); // بستن مرورگر پس از دریافت اطلاعات
+
+        if (!content.trim()) {
+            return ctx.reply("متأسفم! نتوانستم محتوای گفتگو را دریافت کنم. لطفاً اطمینان حاصل کنید که لینک صحیح است.");
+        }
 
         const pdfPath = chat_export_${Date.now()}.pdf;
-        const doc = new PDFDocument();
-        doc.pipe(fs.createWriteStream(pdfPath));
-        doc.fontSize(14).text(content, { align: "right" });
+        const doc = new PDFDocument({ margin: 30 });
+        const stream = fs.createWriteStream(pdfPath);
+        doc.pipe(stream);
+
+        doc.font("Helvetica").fontSize(14).text(content, { align: "right" });
         doc.end();
 
-        ctx.replyWithDocument({ source: pdfPath });
+        stream.on("finish", async () => {
+            await ctx.replyWithDocument({ source: pdfPath });
+            fs.unlinkSync(pdfPath); // حذف فایل بعد از ارسال
+        });
 
-        // حذف فایل بعد از ارسال
-        setTimeout(() => fs.unlinkSync(pdfPath), 5000);
     } catch (error) {
         console.error("Error generating PDF:", error);
         ctx.reply("متأسفم! مشکلی در پردازش لینک به وجود آمد.");
+        if (browser) await browser.close();
     }
 });
 
